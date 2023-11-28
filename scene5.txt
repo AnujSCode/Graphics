@@ -1,0 +1,27 @@
+image 1000 1000
+viewport -10 -10 10 10 6.394 20
+eye 0 1 25
+
+hierarchical vehicle
+transform
+translation 0 1 0
+sphere 0 0 0 2.5
+
+hierarchical tires
+transform
+translation 0 0 1.5
+sphere 0 0 0 1
+
+transform
+translation 0 0 -1.5
+sphere 0 0 0 1
+
+hierarchical extensions
+transform
+translation 0 1.5 0
+sphere 0 0 0 1
+
+transform
+translation 0 -1.5 0
+sphere 0 0 0 1
+

@@ -1,0 +1,45 @@
+image 800 600
+viewport -5 5 -4 4 1
+eye 0 0 5
+
+# Define a car
+sphere body
+    translate 0 0 0
+    scale 1 0.2 0.4
+    color 255 0 0
+
+# Define the car's wheels
+sphere wheel1
+    translate -0.5 -0.2 -0.35
+    scale 0.2 0.2 0.2
+    color 0 0 0
+
+sphere wheel2
+    translate 0.5 -0.2 -0.35
+    scale 0.2 0.2 0.2
+    color 0 0 0
+
+sphere wheel3
+    translate -0.5 -0.2 0.35
+    scale 0.2 0.2 0.2
+    color 0 0 0
+
+sphere wheel4
+    translate 0.5 -0.2 0.35
+    scale 0.2 0.2 0.2
+    color 0 0 0
+
+# Define the ground
+plane ground
+    color 0 255 0
+
+# Define light sources (optional)
+sphere light1
+    translate -2 4 1
+    scale 0.1 0.1 0.1
+    color 255 255 255
+
+sphere light2
+    translate 2 4 1
+    scale 0.1 0.1 0.1
+    color 255 255 255
