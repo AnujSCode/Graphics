@@ -103,7 +103,8 @@ def phong_lighting(intersection, lights, view_direction, material, objects):
             # Point is in shadow, don't add diffuse and specular terms
             total_color += ambient_color * object_color
         else:
-            total_color += ambient_color * object_color + diffuse_term + specular_term
+            total_color += (ambient_color * object_color + diffuse_term + specular_term).astype(np.uint8)
+
 
     total_color = total_color.astype(np.uint8)
     # Clip each color channel individually and return as a tuple of integers
@@ -562,7 +563,9 @@ if __name__ == "__main__":
     # Add the parent object and its children to the main scene
     main_scene.add_object(selected_parent)
     for child in scene_hierarchy.children:
-        main_scene.add_object(child)
+        if isinstance(child, Sphere):
+            main_scene.add_object(child)
+
 
     # Initial render before user interaction
     render(main_scene, lights)
