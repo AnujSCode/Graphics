@@ -311,22 +311,29 @@ def is_point_in_shadow(point, lights, objects, closest_intersection):
         light_direction = np.array(light.position) - point
 
         if closest_intersection.point is None:
-            continue  # Skip further calculations if closest_intersection.point is NoneF
+            continue  # Skip further calculations if closest_intersection.point is None
 
         distance_to_light = np.linalg.norm(light_direction)
         light_direction /= distance_to_light  # Normalize light direction
 
         shadow_ray = Ray(point + 0.001 * light_direction, light_direction)
 
+        shadow_hit_count = 0
         for obj in objects:
             intersection = obj.intersect(shadow_ray)
             if intersection is not None and np.linalg.norm(intersection.point - point) < distance_to_light:
-                in_shadow = True  # Point is in shadow
-                break  # No need to check further, in shadow for this light
+                shadow_hit_count += 1  # Increment shadow hit count
+                # You might consider breaking the loop here or accumulating hits for soft shadows
+
+        # Adjust the threshold for shadow detection
+        if shadow_hit_count > 0.5 * len(objects):  # Adjust threshold as needed
+            in_shadow = True  # Point is in shadow
+
         if in_shadow:
             break  # No need to check further, in shadow for any light
 
     return in_shadow
+
 
 
 # Update read_scene_file to handle lights and material properties

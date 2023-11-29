@@ -1,4 +1,4 @@
-image 1000 1000
+image 500 500
 viewport -10 -10 10 10 6.394 20
 eye 0 0 10
 
@@ -9,5 +9,6 @@ sphere 4 -1 1 1 255 255 0 100 100 100 50 200 200 200 100 100 100 50
 
 plane 2 -2 0 1 0 0 150 150 150 50 150 150 150 50 150 150 150 50
 
-light point 0 10 0 5 5 10
-light directional -1 -1 -1 0 0 0
+light point 0 15 -5 5 5 10
+light directional -1 4 -1 225 225 225
+
