@@ -162,12 +162,26 @@ class Plane(Object):
 
     def intersect(self, ray):
         denom = np.dot(ray.direction, self.normal)
-        if np.abs(denom) > 1e-6:
+        if abs(denom) > 1e-6:  # Ensure the ray is not parallel to the plane
             t = np.dot(np.subtract(self.position, ray.origin), self.normal) / denom
-            if t >= 0:
+            if t > 0:  # Ensure the intersection is in front of the ray's origin
                 point = np.add(ray.origin, np.multiply(t, ray.direction))
                 return Intersection(t, point, self)  # Return the intersection point and the object
         return None
+
+    def intersect_shadow_ray(self, ray, light_position):
+        denom = np.dot(ray.direction, self.normal)
+        if abs(denom) > 1e-6:  # Ensure the ray is not parallel to the plane
+            t = np.dot(np.subtract(self.position, ray.origin), self.normal) / denom
+            if t > 0:  # Ensure the intersection is in front of the ray's origin
+                point = np.add(ray.origin, np.multiply(t, ray.direction))
+                # Check if the intersection point is between the light and the shaded point
+                light_direction = np.subtract(light_position, point)
+                distance_to_light = np.linalg.norm(light_direction)
+                # Check if the intersection point is closer to the light source than the shaded point
+                if distance_to_light < np.linalg.norm(np.subtract(light_position, ray.origin)):
+                    return True  # Intersection is between light and shaded point
+        return False  # No intersection or not between light and shaded point
 
 class Triangle(Object):
     def __init__(self, p1, p2, p3, color):
@@ -225,6 +239,11 @@ class Scene:
         self.lights = []
 
     def add_object(self, obj, material=None):
+        if material is not None:
+            obj.material = material
+        self.objects.append(obj)
+
+    def add_floor(self, obj, material=None):
         if material is not None:
             obj.material = material
         self.objects.append(obj)
@@ -301,7 +320,7 @@ def render(scene, lights):
     pygame.quit()
 
 
-def is_point_in_shadow(point, lights, objects, closest_intersection):
+def is_point_in_shadow(point, lights, objects, closest_intersection, shadow_tolerance=0.001):
     in_shadow = False
 
     for light in lights:
@@ -316,14 +335,25 @@ def is_point_in_shadow(point, lights, objects, closest_intersection):
         distance_to_light = np.linalg.norm(light_direction)
         light_direction /= distance_to_light  # Normalize light direction
 
-        shadow_ray = Ray(point + 0.001 * light_direction, light_direction)
+        shadow_ray_origin = point + shadow_tolerance * light_direction  # Apply shadow tolerance to the shadow ray origin
+        shadow_ray = Ray(shadow_ray_origin, light_direction)
 
         shadow_hit_count = 0
         for obj in objects:
-            intersection = obj.intersect(shadow_ray)
-            if intersection is not None and np.linalg.norm(intersection.point - point) < distance_to_light:
-                shadow_hit_count += 1  # Increment shadow hit count
-                # You might consider breaking the loop here or accumulating hits for soft shadows
+            if isinstance(obj, Plane):  # Check if the object is a plane
+                # Intersection logic for the plane within shadow rays
+                intersection = obj.intersect(shadow_ray)
+                if intersection is not None:
+                    # Check if the intersection is between the light source and the shaded point
+                    shadow_hit_point_to_light = np.linalg.norm(np.array(light.position) - intersection.point)
+                    point_to_light = np.linalg.norm(np.array(light.position) - point)
+                    if 0 < shadow_hit_point_to_light < point_to_light:
+                        shadow_hit_count += 1  # Increment shadow hit count
+
+            else:  # For other objects
+                intersection = obj.intersect(shadow_ray)
+                if intersection is not None and np.linalg.norm(intersection.point - point) < distance_to_light:
+                    shadow_hit_count += 1  # Increment shadow hit count
 
         # Adjust the threshold for shadow detection
         if shadow_hit_count > 0.5 * len(objects):  # Adjust threshold as needed
@@ -333,6 +363,10 @@ def is_point_in_shadow(point, lights, objects, closest_intersection):
             break  # No need to check further, in shadow for any light
 
     return in_shadow
+
+
+
+
 
 
 
@@ -398,6 +432,10 @@ class SceneHierarchy:
             self.children.append(child_object)
         else:
             print("Error: Set a parent object before adding children.")
+
+    def add_child_without_transform(self, child_object):
+        # Add the child without applying transformations
+        self.children.append(child_object)
 
     def render(self):
         if self.parent is not None:
@@ -569,10 +607,12 @@ if __name__ == "__main__":
 
     # Add the parent object and its children to the main scene
     main_scene.add_object(selected_parent)
-    for child in scene_hierarchy.children:
-        if isinstance(child, Sphere):
-            main_scene.add_object(child)
-
+    for obj in scene.objects:
+        if obj != selected_parent:
+            if isinstance(obj, Plane):  # Check if the object is a plane
+                main_scene.add_floor(obj)  # Add the plane directly to the main scene
+            else:
+                main_scene.add_object(obj)  # Add other objects as children
 
     # Initial render before user interaction
     render(main_scene, lights)
