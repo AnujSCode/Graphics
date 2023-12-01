@@ -48,7 +48,7 @@ def phong_lighting(intersection, lights, view_direction, material, objects):
     # Default values if material properties are missing
     default_diffuse_color = np.array([225, 225, 225])
     default_specular_color = np.array([255, 255, 255])
-    default_shininess = 50
+    default_shininess = 100
 
     # Extract material properties if available, otherwise, use default values
     diffuse_color = np.array(material.get('diffuse_color', default_diffuse_color))
@@ -112,7 +112,44 @@ def phong_lighting(intersection, lights, view_direction, material, objects):
 
     return clipped_color
 
+def phong_lighting(point, normal, view_dir, obj_material, lights):
+    ambient_color = np.array(obj_material['ambient']) if 'ambient' in obj_material else np.array([50, 50, 50])
+    diffuse_color = np.array(obj_material['diffuse']) if 'diffuse' in obj_material else np.array([200, 200, 200])
+    specular_color = np.array(obj_material['specular']) if 'specular' in obj_material else np.array([255, 255, 255])
+    shininess = obj_material['shininess'] if 'shininess' in obj_material else 50
 
+    total_color = ambient_color
+
+    for light in lights:
+        if light.type == 'directional':
+            light_dir = -np.array(light.direction)
+        elif light.type == 'point':
+            light_dir = np.array(light.position) - point
+            light_dir /= np.linalg.norm(light_dir)
+
+        # Ambient light calculation
+        ambient = ambient_color * light.color / 255
+
+        # Diffuse light calculation
+        diffuse_intensity = np.dot(normal, light_dir)
+        if diffuse_intensity > 0:
+            diffuse = diffuse_color * light.color / 255 * diffuse_intensity
+            total_color += diffuse
+
+            # Specular light calculation
+            reflect_dir = -reflect(light_dir, normal)
+            specular_intensity = np.dot(view_dir, reflect_dir)
+            if specular_intensity > 0:
+                specular = specular_color * light.color / 255 * (specular_intensity ** shininess)
+                total_color += specular
+
+    # Clamp color values to be in the valid range [0, 255]
+    total_color = np.clip(total_color, 0, 255)
+
+    return total_color.astype(int)
+
+def reflect(v, n):
+    return v - 2 * np.dot(v, n) * n
 
 class Ray:
     def __init__(self, origin, direction):
@@ -152,6 +189,27 @@ class Sphere(Object):
         center_homogeneous = np.append(self.center, 1)  # Convert to homogeneous coordinates
         transformed_center_homogeneous = np.dot(transformation.get_matrix(), center_homogeneous)
         self.center = transformed_center_homogeneous[:3]  # Convert back to 3D coordinates
+
+    def intersect_shadow_ray(self, ray, light_position):
+        oc = self.center - ray.origin
+        t_ca = np.dot(oc, ray.direction)
+        d_squared = np.dot(oc, oc) - t_ca * t_ca
+
+        # Check if the shadow ray misses the sphere
+        if d_squared > self.radius * self.radius:
+            return False
+
+        t_hc = np.sqrt(self.radius * self.radius - d_squared)
+        t = t_ca - t_hc if t_ca - t_hc > 0 else t_ca + t_hc
+
+        # Check if the intersection is between the light and the shaded point
+        if t > 0:
+            point = ray.origin + t * ray.direction
+            distance_to_light = np.linalg.norm(light_position - point)
+            if distance_to_light < np.linalg.norm(light_position - ray.origin):
+                return True  # Intersection is between light and shaded point
+
+        return False  # No intersection or not between light and shaded point
 
 
 class Plane(Object):
@@ -243,10 +301,6 @@ class Scene:
             obj.material = material
         self.objects.append(obj)
 
-    def add_floor(self, obj, material=None):
-        if material is not None:
-            obj.material = material
-        self.objects.append(obj)
 
     # Add a method to add lights to the scene
     def add_light(self, light):
@@ -275,8 +329,17 @@ def render_pixel(i, j, viewport, image_size, camera, objects, lights):
         if lights:  # Check if there are lights in the scene
             in_shadow = is_point_in_shadow(closest_intersection.point, lights, objects, closest_intersection)
 
-            if in_shadow:
-                pixel_color = (50, 50, 50)
+            if (not in_shadow):
+                # Calculate pixel color using phong lighting when in shadow
+                pixel_color = phong_lighting(closest_intersection, lights, view_direction,
+                                             closest_intersection.object.material, objects)
+
+                # Reduce the strength of the shadow by applying a factor to the pixel color
+                shadow_strength = 0.5  # Adjust the shadow strength factor as needed
+                pixel_color = tuple(int(component * shadow_strength) for component in pixel_color)
+
+
+
             else:
                 pixel_color = phong_lighting(closest_intersection, lights, view_direction, closest_intersection.object.material, objects)
         else:
@@ -320,49 +383,29 @@ def render(scene, lights):
     pygame.quit()
 
 
-def is_point_in_shadow(point, lights, objects, closest_intersection, shadow_tolerance=0.001):
-    in_shadow = False
+def is_point_in_shadow(point, lights, objects, intersection):
+    shadow_intensity = 0.0
 
-    for light in lights:
-        if light.position is None:
-            continue  # Skip this light if position is None
+    for obj in objects:
+        if obj != intersection.object:  # Ignore the current object
+            for light in lights:
+                if light.type == 'point':
+                    shadow_ray = Ray(point, np.subtract(light.position, point))
 
-        light_direction = np.array(light.position) - point
+                    if isinstance(obj, Plane) or isinstance(obj, Sphere):
+                        intersection_shadow = obj.intersect_shadow_ray(shadow_ray, light.position)
 
-        if closest_intersection.point is None:
-            continue  # Skip further calculations if closest_intersection.point is None
+                        # If an intersection is found, increment shadow intensity
+                        if intersection_shadow:
+                            shadow_intensity += 0.1  # Adjust this value to control shadow strength
 
-        distance_to_light = np.linalg.norm(light_direction)
-        light_direction /= distance_to_light  # Normalize light direction
+    # Normalize the shadow intensity to a range of 0 to 1
+    shadow_intensity = min(1.0, shadow_intensity)
 
-        shadow_ray_origin = point + shadow_tolerance * light_direction  # Apply shadow tolerance to the shadow ray origin
-        shadow_ray = Ray(shadow_ray_origin, light_direction)
+    # Modify the shadow intensity of the point being shaded
+    # You can use this shadow_intensity value to attenuate the color at the intersection point
 
-        shadow_hit_count = 0
-        for obj in objects:
-            if isinstance(obj, Plane):  # Check if the object is a plane
-                # Intersection logic for the plane within shadow rays
-                intersection = obj.intersect(shadow_ray)
-                if intersection is not None:
-                    # Check if the intersection is between the light source and the shaded point
-                    shadow_hit_point_to_light = np.linalg.norm(np.array(light.position) - intersection.point)
-                    point_to_light = np.linalg.norm(np.array(light.position) - point)
-                    if 0 < shadow_hit_point_to_light < point_to_light:
-                        shadow_hit_count += 1  # Increment shadow hit count
-
-            else:  # For other objects
-                intersection = obj.intersect(shadow_ray)
-                if intersection is not None and np.linalg.norm(intersection.point - point) < distance_to_light:
-                    shadow_hit_count += 1  # Increment shadow hit count
-
-        # Adjust the threshold for shadow detection
-        if shadow_hit_count > 0.5 * len(objects):  # Adjust threshold as needed
-            in_shadow = True  # Point is in shadow
-
-        if in_shadow:
-            break  # No need to check further, in shadow for any light
-
-    return in_shadow
+    return shadow_intensity
 
 
 
@@ -610,7 +653,7 @@ if __name__ == "__main__":
     for obj in scene.objects:
         if obj != selected_parent:
             if isinstance(obj, Plane):  # Check if the object is a plane
-                main_scene.add_floor(obj)  # Add the plane directly to the main scene
+                main_scene.add_object(obj)  # Add the plane directly to the main scene
             else:
                 main_scene.add_object(obj)  # Add other objects as children
 
