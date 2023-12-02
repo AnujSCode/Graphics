@@ -48,7 +48,7 @@ def phong_lighting(intersection, lights, view_direction, material, objects):
     # Default values if material properties are missing
     default_diffuse_color = np.array([225, 225, 225])
     default_specular_color = np.array([255, 255, 255])
-    default_shininess = 100
+    default_shininess = 50
 
     # Extract material properties if available, otherwise, use default values
     diffuse_color = np.array(material.get('diffuse_color', default_diffuse_color))
@@ -63,32 +63,32 @@ def phong_lighting(intersection, lights, view_direction, material, objects):
 
 
     for light in lights:
-        print(light)
+
         light_intensity = np.array(light.color) / 255.0
 
         if light.type == 'point':
             light_direction = np.array(light.position) - np.array(intersection.point)
             light_distance = np.linalg.norm(light_direction)
-            light_direction = light_direction / light_distance  # Normalize light direction
-            print(f"Point Light Intensity: {light_intensity}")
-            print(f"Light Direction: {light_direction}")
+
+
         elif light.type == 'directional':
             light_direction = np.array(light.direction)
             light_distance = float('inf')  # Consider directional light at infinity
-            print(f"Directional Light Intensity: {light_intensity}")
-            print(f"Light Direction: {light_direction}")
+
 
         # Diffuse component
         diffuse_factor = max(np.dot(intersection.object.normal, light_direction), 0)
         diffuse_term = diffuse_color * light_intensity * diffuse_factor
 
         # Specular component
-        reflection = 2 * np.dot(intersection.object.normal, light_direction) * np.array(intersection.object.normal) - light_direction
+        reflection = 2 * np.dot(intersection.object.normal, light_direction) * np.array(
+            intersection.object.normal) - light_direction
         reflection /= np.linalg.norm(reflection)  # Normalize the reflection vector
-        specular_factor = max(np.dot(reflection, view_direction), 0) ** shininess  # Considering shininess
-        print(f"Specular Factor: {specular_factor}")
+        specular_factor = max(np.dot(reflection, view_direction), 0) / shininess  # Considering shininess
+        print(f"Reflection Vector: {reflection}")  # Add this line for debugging
+        print(f"View Direction: {view_direction}")  # And this, to check view direction
 
-        specular_term = specular_color * light_intensity * specular_factor
+        specular_term = specular_color * light_intensity * specular_factor * 2
 
         # Print out intermediate values for debugging
         print("Diffuse Term:", diffuse_term)
@@ -112,44 +112,7 @@ def phong_lighting(intersection, lights, view_direction, material, objects):
 
     return clipped_color
 
-def phong_lighting(point, normal, view_dir, obj_material, lights):
-    ambient_color = np.array(obj_material['ambient']) if 'ambient' in obj_material else np.array([50, 50, 50])
-    diffuse_color = np.array(obj_material['diffuse']) if 'diffuse' in obj_material else np.array([200, 200, 200])
-    specular_color = np.array(obj_material['specular']) if 'specular' in obj_material else np.array([255, 255, 255])
-    shininess = obj_material['shininess'] if 'shininess' in obj_material else 50
 
-    total_color = ambient_color
-
-    for light in lights:
-        if light.type == 'directional':
-            light_dir = -np.array(light.direction)
-        elif light.type == 'point':
-            light_dir = np.array(light.position) - point
-            light_dir /= np.linalg.norm(light_dir)
-
-        # Ambient light calculation
-        ambient = ambient_color * light.color / 255
-
-        # Diffuse light calculation
-        diffuse_intensity = np.dot(normal, light_dir)
-        if diffuse_intensity > 0:
-            diffuse = diffuse_color * light.color / 255 * diffuse_intensity
-            total_color += diffuse
-
-            # Specular light calculation
-            reflect_dir = -reflect(light_dir, normal)
-            specular_intensity = np.dot(view_dir, reflect_dir)
-            if specular_intensity > 0:
-                specular = specular_color * light.color / 255 * (specular_intensity ** shininess)
-                total_color += specular
-
-    # Clamp color values to be in the valid range [0, 255]
-    total_color = np.clip(total_color, 0, 255)
-
-    return total_color.astype(int)
-
-def reflect(v, n):
-    return v - 2 * np.dot(v, n) * n
 
 class Ray:
     def __init__(self, origin, direction):
@@ -211,6 +174,15 @@ class Sphere(Object):
 
         return False  # No intersection or not between light and shaded point
 
+    def normal_at(self, point):
+        # Calculate the normalized normal vector at a given point on the sphere
+        return (point - self.center) / np.linalg.norm(point - self.center)
+
+    def transform(self, transformation):
+        # Transform the sphere by applying the transformation matrix to its center
+        center_homogeneous = np.append(self.center, 1)  # Convert to homogeneous coordinates
+        transformed_center_homogeneous = np.dot(transformation.get_matrix(), center_homogeneous)
+        self.center = transformed_center_homogeneous[:3]  # Convert back to 3D coordinates
 
 class Plane(Object):
     def __init__(self, position, normal, color):
@@ -240,6 +212,26 @@ class Plane(Object):
                 if distance_to_light < np.linalg.norm(np.subtract(light_position, ray.origin)):
                     return True  # Intersection is between light and shaded point
         return False  # No intersection or not between light and shaded point
+
+    def normal_at(self, point):
+        # For a plane, the normal is constant
+        return self.normal
+
+    def transform(self, transformation):
+        # Transform the plane by applying the transformation matrix to its position
+        position_homogeneous = np.append(self.position, 1)  # Convert to homogeneous coordinates
+        transformed_position_homogeneous = np.dot(transformation.get_matrix(), position_homogeneous)
+        self.position = transformed_position_homogeneous[:3]  # Convert back to 3D coordinates
+
+        # Transform the normal vector of the plane
+        normal_matrix = np.linalg.inv(np.transpose(transformation.get_matrix()))
+        normal_homogeneous = np.append(self.normal, 0)  # Convert to homogeneous coordinates
+        transformed_normal_homogeneous = np.dot(normal_matrix, normal_homogeneous)
+        self.normal = transformed_normal_homogeneous[:3]  # Convert back to 3D coordinates and normalize
+
+        # Normalize the transformed normal
+        self.normal /= np.linalg.norm(self.normal)
+
 
 class Triangle(Object):
     def __init__(self, p1, p2, p3, color):
@@ -288,6 +280,52 @@ class Triangle(Object):
         # No hit, no win
         return None
 
+    def intersect_shadow_ray(self, shadow_ray, light_direction):
+        edge1 = self.p2 - self.p1
+        edge2 = self.p3 - self.p1
+
+        pvec = np.cross(shadow_ray.direction, edge2)
+        det = np.dot(edge1, pvec)
+
+        if det > -0.000001 and det < 0.000001:
+            return False
+        inv_det = 1.0 / det
+
+        tvec = shadow_ray.origin - self.p1
+        u = np.dot(tvec, pvec) * inv_det
+
+        if u < 0.0 or u > 1.0:
+            return False
+
+        qvec = np.cross(tvec, edge1)
+        v = np.dot(shadow_ray.direction, qvec) * inv_det
+
+        if v < 0.0 or u + v > 1.0:
+            return False
+
+        t = np.dot(edge2, qvec) * inv_det
+
+        return t > 0.000001
+
+    def normal_at(self, point):
+        # For a plane, the normal is constant
+        return self.normal
+
+    def transform(self, transformation):
+        # Transform each point of the triangle by applying the transformation matrix
+        p1_homogeneous = np.append(self.p1, 1)
+        transformed_p1_homogeneous = np.dot(transformation.get_matrix(), p1_homogeneous)
+        self.p1 = transformed_p1_homogeneous[:3]
+
+        p2_homogeneous = np.append(self.p2, 1)
+        transformed_p2_homogeneous = np.dot(transformation.get_matrix(), p2_homogeneous)
+        self.p2 = transformed_p2_homogeneous[:3]
+
+        p3_homogeneous = np.append(self.p3, 1)
+        transformed_p3_homogeneous = np.dot(transformation.get_matrix(), p3_homogeneous)
+        self.p3 = transformed_p3_homogeneous[:3]
+
+
 class Scene:
     def __init__(self, viewport, image_size, camera):
         self.viewport = viewport
@@ -301,6 +339,10 @@ class Scene:
             obj.material = material
         self.objects.append(obj)
 
+    def add_floor(self, obj, material=None):
+        if material is not None:
+            obj.material = material
+        self.objects.append(obj)
 
     # Add a method to add lights to the scene
     def add_light(self, light):
@@ -309,8 +351,7 @@ class Scene:
 # Your other code...
 
 def render_pixel(i, j, viewport, image_size, camera, objects, lights):
-    for light in lights:
-        print(light)
+
     x = viewport[0] + (viewport[2] - viewport[0]) * j / image_size[0]
     y = viewport[1] + (viewport[3] - viewport[1]) * i / image_size[1]
     ray = Ray(camera, [x, y, viewport[4]])
@@ -329,26 +370,63 @@ def render_pixel(i, j, viewport, image_size, camera, objects, lights):
         if lights:  # Check if there are lights in the scene
             in_shadow = is_point_in_shadow(closest_intersection.point, lights, objects, closest_intersection)
 
-            if (not in_shadow):
-                # Calculate pixel color using phong lighting when in shadow
+            if in_shadow:
                 pixel_color = phong_lighting(closest_intersection, lights, view_direction,
                                              closest_intersection.object.material, objects)
+                shadow_color = tuple(int(c * 0.5) for c in pixel_color)
+                pixel_color = shadow_color
 
-                # Reduce the strength of the shadow by applying a factor to the pixel color
-                shadow_strength = 0.5  # Adjust the shadow strength factor as needed
-                pixel_color = tuple(int(component * shadow_strength) for component in pixel_color)
+
+
 
 
 
             else:
-                pixel_color = phong_lighting(closest_intersection, lights, view_direction, closest_intersection.object.material, objects)
+
+                pixel_color = phong_lighting(closest_intersection, lights, view_direction,
+
+                                             closest_intersection.object.material, objects)
+
+                intersection_point = closest_intersection.point
+
+                center = np.array([0, 0, 0])  # Assuming the center is at (0, 0, 0)
+
+                distance_from_center = np.linalg.norm(intersection_point - center)
+
+                max_distance = 100.0  # You can adjust the maximum distance for the gradient effect
+
+                normalized_distance = min(distance_from_center / max_distance, 1.0)  # Normalize to [0, 1]
+
+                object_normal = closest_intersection.object.normal_at(intersection_point)
+
+                light_direction = lights[0].direction  # Assuming only one directional light
+
+                light_intensity = np.dot(object_normal, light_direction)
+
+                # Adjust the base color to make the center brighter (closer to white)
+
+                base_color = 200  # Increase this value to make the center brighter
+
+                highlight_intensity = max(light_intensity, 0) * normalized_distance
+
+                # Adjust the highlight_color with the base_color
+
+                highlight_color = tuple(min(int(c + base_color * highlight_intensity), 255) for c in pixel_color)
+
+                # Adding a small white dot at the center
+
+                epsilon = 0.01  # Define a small threshold for considering the center
+
+                if distance_from_center < epsilon:
+                    highlight_color = (255, 255, 255)  # White color for the small dot
+
+                pixel_color = highlight_color
+
         else:
             pixel_color = phong_lighting(closest_intersection, [], view_direction, closest_intersection.object.material, objects)
 
         return (i, j, pixel_color)
     return (i, j, (0, 0, 0))
-
-
 
 
 
@@ -384,28 +462,25 @@ def render(scene, lights):
 
 
 def is_point_in_shadow(point, lights, objects, intersection):
-    shadow_intensity = 0.0
+    intersection_shadow = False
 
     for obj in objects:
-        if obj != intersection.object:  # Ignore the current object
+        if obj != intersection.object:
+            if isinstance(obj, Sphere):
+                continue
             for light in lights:
                 if light.type == 'point':
                     shadow_ray = Ray(point, np.subtract(light.position, point))
-
-                    if isinstance(obj, Plane) or isinstance(obj, Sphere):
+                    if isinstance(obj, Plane):
+                        # Check if the shadow ray intersects the plane
                         intersection_shadow = obj.intersect_shadow_ray(shadow_ray, light.position)
+                    else:
+                        # For other objects, continue with existing shadow logic
+                        intersection_shadow = obj.intersect_shadow_ray(shadow_ray, light.position)
+                    if intersection_shadow:
+                        return True
 
-                        # If an intersection is found, increment shadow intensity
-                        if intersection_shadow:
-                            shadow_intensity += 0.1  # Adjust this value to control shadow strength
-
-    # Normalize the shadow intensity to a range of 0 to 1
-    shadow_intensity = min(1.0, shadow_intensity)
-
-    # Modify the shadow intensity of the point being shaded
-    # You can use this shadow_intensity value to attenuate the color at the intersection point
-
-    return shadow_intensity
+    return False
 
 
 
@@ -441,12 +516,23 @@ def read_scene_file(scene_file):
                 }
                 sphere = Sphere(position, radius, color)
                 scene.add_object(sphere, material)
+            elif tokens[0] == 'triangle':
+                p1 = list(map(float, tokens[1:4]))
+                p2 = list(map(float, tokens[4:7]))
+                p3 = list(map(float, tokens[7:10]))
+                color = list(map(int, tokens[10:13]))
+                material = {
+                    'diffuse_color': list(map(int, tokens[13:16])),
+                    'specular_color': list(map(int, tokens[16:19])),
+                    'shininess': float(tokens[19])
+                }
+                triangle = Triangle(p1, p2, p3, color)
+                scene.add_object(triangle, material)
             elif tokens[0] == 'plane':
                 position = list(map(float, tokens[1:4]))
                 normal = list(map(float, tokens[4:7]))
                 color = list(map(int, tokens[7:10]))
                 scene.add_object(Plane(position, normal, color))
-
             elif tokens[0] == 'light':
                 light_type = tokens[1]
                 if light_type == 'point':
@@ -461,6 +547,7 @@ def read_scene_file(scene_file):
                 color = list(map(int, tokens[5:8]))
                 lights.append(Light(light_type, position, direction, color))
     return scene, lights
+
 
 class SceneHierarchy:
     def __init__(self):
@@ -653,7 +740,7 @@ if __name__ == "__main__":
     for obj in scene.objects:
         if obj != selected_parent:
             if isinstance(obj, Plane):  # Check if the object is a plane
-                main_scene.add_object(obj)  # Add the plane directly to the main scene
+                main_scene.add_floor(obj)  # Add the plane directly to the main scene
             else:
                 main_scene.add_object(obj)  # Add other objects as children
 

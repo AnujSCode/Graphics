@@ -6,7 +6,7 @@ import multiprocessing
 from multiprocessing import Pool
 import matplotlib.pyplot as plt
 
-scene_file = "scene3.txt"
+scene_file = "scene4.txt"
 
 class Object:
     def __init__(self, color, position = None, normal = None):
@@ -73,9 +73,9 @@ class Plane(Object):
 class Triangle(Object):
     def __init__(self, p1, p2, p3, color):
         super().__init__(color)
-        self.p1 = np.array(p1)
-        self.p2 = np.array(p2)
-        self.p3 = np.array(p3)
+        self.p1 = np.array([p1[0], p1[1], 0])  # Assuming vertices are in 2D, adding a default z-value of 0
+        self.p2 = np.array([p2[0], p2[1], 0])
+        self.p3 = np.array([p3[0], p3[1], 0])
 
     def intersect(self, ray):
         # Compute vectors along two edges of the triangle
@@ -149,7 +149,7 @@ def read_scene_file(scene_file):
             elif tokens[0] == 'plane':
                 # add a Plane to the Scene
                 scene.add_object(Plane(list(map(float, tokens[1:4])), None, (0, 255, 0)))  # ensure position is a 3-element list
-            elif tokens[0] == 'tri':
+            elif tokens[0] == 'triangle':
                 # add a Triangle to the Scene
                 p1 = list(map(float, tokens[1:4]))
                 p2 = list(map(float, tokens[4:7]))

@@ -5,9 +5,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="12090503-80fe-4bc1-8395-ca1fbbbd3145" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/works.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/closeee.py" beforeDir="false" afterPath="$PROJECT_DIR$/closeee.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/output.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/scene.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/scene2.txt" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/scene3.txt" beforeDir="false" afterPath="$PROJECT_DIR$/scene3.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scene4.txt" beforeDir="false" afterPath="$PROJECT_DIR$/scene4.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scene5.txt" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/working.py" beforeDir="false" afterPath="$PROJECT_DIR$/working.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
