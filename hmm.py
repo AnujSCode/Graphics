@@ -7,8 +7,8 @@ from multiprocessing import Pool
 import matplotlib.pyplot as plt
 import pygame
 
-
 scene_file = "scene3.txt"
+
 
 class Light:
     def __init__(self, light_type, position, direction, color):
@@ -16,6 +16,12 @@ class Light:
         self.position = position if light_type == 'point' else None
         self.direction = direction if light_type == 'directional' else None
         self.color = color
+
+        if light_type == 'directional' and direction is not None:
+            # Convert the provided direction into a normalized vector
+            direction = np.array(direction)  # Convert to NumPy array for vector operations
+            magnitude = np.linalg.norm(direction)  # Calculate magnitude
+            self.direction = direction / magnitude  # Normalize the direction vector
 
 
 # Update the Object class to include material properties
@@ -39,80 +45,124 @@ def intersect_scene(ray, objects):
 
     return closest_intersection
 
-def phong_lighting(intersection, lights, view_direction, material, objects):
-    ambient_color = np.array([20, 20, 20])  # Ambient color
-    light_direction = None
-    light_distance = None
+
+def render_pixel(i, j, viewport, image_size, camera, objects, lights):
+    x = viewport[0] + (viewport[2] - viewport[0]) * j / image_size[0]
+    y = viewport[1] + (viewport[3] - viewport[1]) * i / image_size[1]
+    ray = Ray(camera, [x, y, viewport[4]])
+
+    closest_intersection = None
+    for obj in objects:
+        intersection = obj.intersect(ray)
+        if intersection is not None and (closest_intersection is None or intersection.t < closest_intersection.t):
+            closest_intersection = intersection
+
+    if closest_intersection is not None:
+        incident_direction = ray.direction
+        view_direction = -incident_direction
+
+        pixel_color = np.zeros(3)  # Initialize color as black
+
+        for light in lights:
+            shadow_ray = None
+            if light.type == 'point':
+                shadow_ray_direction = normalize(light.position - closest_intersection.point)
+                shadow_ray_origin = closest_intersection.point +.001 * shadow_ray_direction # Offset origin slightly
+                shadow_ray = Ray(shadow_ray_origin, shadow_ray_direction)
+            elif light.type == 'directional':
+                shadow_ray_direction = normalize(-light.direction)
+                shadow_ray_origin = closest_intersection.point + 0.001 * shadow_ray_direction  # Offset origin slightly
+                shadow_ray = Ray(shadow_ray_origin, shadow_ray_direction)
+
+            if shadow_ray:
+                in_shadow = False
+                for obj in objects:
+                    if obj != closest_intersection.object and obj.intersect(shadow_ray):
+                        in_shadow = True
+                        break
+
+                if in_shadow:
+                    pixel_color = phong_model(closest_intersection, light, view_direction,
+                                              ambient_intensity=0.1, light_intensity=1, shininess=50)
+                    shadow_color = tuple(int(c * 0.6) for c in pixel_color)
+                    pixel_color = shadow_color
+                else:
+                    pixel_color += phong_model(closest_intersection, light, view_direction,
+                                               ambient_intensity=0.1, light_intensity=0.8, shininess=50)
+
+        return (i, j, tuple(int(c) for c in pixel_color))
+
+    return (i, j, (0, 0, 0))  # Return black for no intersection
 
 
-    # Default values if material properties are missing
-    default_diffuse_color = np.array([225, 225, 225])
-    default_specular_color = np.array([255, 255, 255])
-    default_shininess = 50
+def render(scene, lights):
+    image = np.zeros((scene.image_size[1], scene.image_size[0], 3), dtype=np.uint8)
+    image_surface = pygame.display.set_mode(scene.image_size)
 
-    # Extract material properties if available, otherwise, use default values
-    diffuse_color = np.array(material.get('diffuse_color', default_diffuse_color))
-    specular_color = np.array(material.get('specular_color', default_specular_color))
-    shininess = material.get('shininess', default_shininess)
+    # Create a thread pool with the number of workers equal to the number of CPU cores
+    num_cores = multiprocessing.cpu_count()
+    with Pool(2 * num_cores) as p:
+        results = p.starmap(render_pixel,
+                            [(i, j, scene.viewport, scene.image_size, scene.camera, scene.objects, lights)
+                             for i in range(scene.image_size[1]) for j in range(scene.image_size[0])])
 
-    object_color = np.array(intersection.object.color)
+    # Set the pixel colors in the image based on the results
+    for result in results:
+        i, j, color = result
+        pixel_color = tuple(map(int, color))  # Ensure color values are integers
+        # Assuming pixel_color is an out-of-bound Python integer being assigned to an image array
+        image[i, j] = np.array(pixel_color).astype(image.dtype)
 
-    total_color = ambient_color * object_color # Initialize with ambient light
+    # Convert the image array to a Pygame surface
+    pygame.surfarray.blit_array(image_surface, image)
 
-    # Debugging lines for ambient light
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
 
+        pygame.display.flip()
 
-    for light in lights:
-
-        light_intensity = np.array(light.color) / 255.0
-
-        if light.type == 'point':
-            light_direction = np.array(light.position) - np.array(intersection.point)
-            light_distance = np.linalg.norm(light_direction)
-
-
-        elif light.type == 'directional':
-            light_direction = np.array(light.direction)
-            light_distance = float('inf')  # Consider directional light at infinity
-
-
-        # Diffuse component
-        diffuse_factor = max(np.dot(intersection.object.normal, light_direction), 0)
-        diffuse_term = diffuse_color * light_intensity * diffuse_factor
-
-        # Specular component
-        reflection = 2 * np.dot(intersection.object.normal, light_direction) * np.array(
-            intersection.object.normal) - light_direction
-        reflection /= np.linalg.norm(reflection)  # Normalize the reflection vector
-        specular_factor = max(np.dot(reflection, view_direction), 0) ** shininess  # Considering shininess
-        print(f"Reflection Vector: {reflection}")  # Add this line for debugging
-        print(f"View Direction: {view_direction}")  # And this, to check view direction
-
-        specular_term = specular_color * light_intensity * specular_factor * 2
-
-        # Print out intermediate values for debugging
-        print("Diffuse Term:", diffuse_term)
-        print("Specular Term:", specular_term)
-
-        # Shadows: Check if point is in shadow
-        shadow_ray = Ray(intersection.point + 0.001 * light_direction, light_direction)
-        shadow_intersection = intersect_scene(shadow_ray, objects)  # Provide 'objects' argument
-
-        if shadow_intersection is not None and np.linalg.norm(
-                shadow_intersection.point - intersection.point) < light_distance:
-            # Point is in shadow, don't add diffuse and specular terms
-            total_color += ambient_color * object_color
-        else:
-            total_color += (ambient_color * object_color + diffuse_term + specular_term).astype(np.uint8)
+    pygame.quit()
 
 
-    total_color = total_color.astype(np.uint8)
-    # Clip each color channel individually and return as a tuple of integers
-    clipped_color = tuple(np.clip(total_color.astype(int), 0, 255))
+def phong_model(intersection, light, viewer, ambient_intensity, light_intensity, shininess):
+    # Calculate vectors
+    normal = intersection.object.normal_at(intersection.point)
 
-    return clipped_color
+    if light.type == 'point':
+        light_dir = normalize(light.position - intersection.point)
+    elif light.type == 'directional':
 
+        light_dir = normalize(-light.direction)  # Reverse direction for directional light
 
+    viewer_dir = normalize(viewer - intersection.point)
+
+    # Ambient component
+    ambient = np.array(intersection.object.color) * ambient_intensity
+
+    # Diffuse component
+    diffuse_light_intensity = np.maximum(np.dot(light_dir, normal), 0) * light_intensity
+    diffuse = np.array(intersection.object.color) * diffuse_light_intensity
+
+    # Specular component
+    reflection_dir = reflect(-light_dir, normal)
+    specular_light_intensity = light_intensity * (np.maximum(np.dot(reflection_dir, viewer_dir), 0) ** shininess)
+    specular = np.array(light.color) * specular_light_intensity
+
+    # Sum up to get final color
+    color = ambient + diffuse + specular
+
+    return color
+
+def normalize(vector):
+    return vector / np.linalg.norm(vector)
+
+def reflect(vector, axis):
+    vector = np.array(vector)
+    axis = np.array(axis)
+    return vector - 2 * np.dot(vector, axis) * axis
 
 class Ray:
     def __init__(self, origin, direction):
@@ -234,11 +284,17 @@ class Plane(Object):
 
 
 class Triangle(Object):
-    def __init__(self, p1, p2, p3, color):
+    def __init__(self, p1, p2, p3, color, material=None):
         super().__init__(color)
         self.p1 = np.array(p1)
         self.p2 = np.array(p2)
         self.p3 = np.array(p3)
+        self.material = material if material is not None else {
+            'diffuse_color': [255, 0, 0],  # Diffuse color (e.g., red)
+            'specular_color': [255, 255, 255],  # Specular color (e.g., white)
+            'shininess': 50  # Shininess value
+
+        }
 
     def intersect(self, ray):
         # Compute vectors along two edges of the triangle
@@ -277,6 +333,7 @@ class Triangle(Object):
         if t > 0.000001:  # ray intersection
             return Intersection(t, ray.origin + ray.direction * t, self)
 
+
         # No hit, no win
         return None
 
@@ -308,8 +365,11 @@ class Triangle(Object):
         return t > 0.000001
 
     def normal_at(self, point):
-        # For a plane, the normal is constant
-        return self.normal
+        edge1 = self.p2 - self.p1
+        edge2 = self.p3 - self.p1
+        normal = np.cross(edge1, edge2)
+        normalized_normal = normalize(normal)
+        return normalized_normal
 
     def transform(self, transformation):
         # Transform each point of the triangle by applying the transformation matrix
@@ -347,140 +407,6 @@ class Scene:
     # Add a method to add lights to the scene
     def add_light(self, light):
         self.lights.append(light)
-
-# Your other code...
-
-def render_pixel(i, j, viewport, image_size, camera, objects, lights):
-
-    x = viewport[0] + (viewport[2] - viewport[0]) * j / image_size[0]
-    y = viewport[1] + (viewport[3] - viewport[1]) * i / image_size[1]
-    ray = Ray(camera, [x, y, viewport[4]])
-
-    closest_intersection = None
-    for obj in objects:
-        intersection = obj.intersect(ray)
-        if intersection is not None and (closest_intersection is None or intersection.t < closest_intersection.t):
-            closest_intersection = intersection
-
-    if closest_intersection is not None:
-        incident_direction = ray.direction
-        normal_at_intersection = closest_intersection.object.normal
-        view_direction = -incident_direction
-
-        if lights:  # Check if there are lights in the scene
-            in_shadow = is_point_in_shadow(closest_intersection.point, lights, objects, closest_intersection)
-
-            if in_shadow:
-                pixel_color = phong_lighting(closest_intersection, lights, view_direction,
-                                             closest_intersection.object.material, objects)
-                shadow_color = tuple(int(c * 0.5) for c in pixel_color)
-                pixel_color = shadow_color
-
-            else:
-
-                pixel_color = phong_lighting(closest_intersection, lights, view_direction,
-
-                                             closest_intersection.object.material, objects)
-
-                intersection_point = closest_intersection.point
-
-                center = np.array([0, 0, 0])  # Assuming the center is at (0, 0, 0)
-
-                distance_from_center = np.linalg.norm(intersection_point - center)
-
-                max_distance = 100.0  # You can adjust the maximum distance for the gradient effect
-
-                normalized_distance = min(distance_from_center / max_distance, 1.0)  # Normalize to [0, 1]
-
-                object_normal = closest_intersection.object.normal_at(intersection_point)
-
-                light_direction = lights[0].direction  # Assuming only one directional light
-
-                light_intensity = np.dot(object_normal, light_direction)
-
-                # Adjust the base color to make the center brighter (closer to white)
-
-                base_color = 200  # Increase this value to make the center brighter
-
-                highlight_intensity = max(light_intensity, 0) * normalized_distance
-
-                # Adjust the highlight_color with the base_color
-
-                highlight_color = tuple(min(int(c + base_color * highlight_intensity), 255) for c in pixel_color)
-
-                # Adding a small white dot at the center
-
-                epsilon = 0.01  # Define a small threshold for considering the center
-
-                if distance_from_center < epsilon:
-                    highlight_color = (255, 255, 255)  # White color for the small dot
-
-                pixel_color = highlight_color
-
-        else:
-            pixel_color = phong_lighting(closest_intersection, [], view_direction, closest_intersection.object.material, objects)
-
-        return (i, j, pixel_color)
-    return (i, j, (0, 0, 0))
-
-
-
-def render(scene, lights):
-    image = np.zeros((scene.image_size[1], scene.image_size[0], 3), dtype=np.uint8)
-    image_surface = pygame.display.set_mode(scene.image_size)
-
-    # Create a thread pool with the number of workers equal to the number of CPU cores
-    num_cores = multiprocessing.cpu_count()
-    with Pool(2 * num_cores) as p:
-        results = p.starmap(render_pixel,
-                            [(i, j, scene.viewport, scene.image_size, scene.camera, scene.objects, lights)
-                             for i in range(scene.image_size[1]) for j in range(scene.image_size[0])])
-
-    # Set the pixel colors in the image based on the results
-    for result in results:
-        i, j, color = result
-        pixel_color = tuple(map(int, color))  # Ensure color values are integers
-        image[i, j] = pixel_color
-
-    # Convert the image array to a Pygame surface
-    pygame.surfarray.blit_array(image_surface, image)
-
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-
-        pygame.display.flip()
-
-    pygame.quit()
-
-
-def is_point_in_shadow(point, lights, objects, intersection):
-    intersection_shadow = False
-
-    for obj in objects:
-        if obj != intersection.object:
-            if isinstance(obj, Sphere):
-                continue
-            for light in lights:
-                if light.type == 'point':
-                    shadow_ray = Ray(point, np.subtract(light.position, point))
-                    if isinstance(obj, Plane):
-                        # Check if the shadow ray intersects the plane
-                        intersection_shadow = obj.intersect_shadow_ray(shadow_ray, light.position)
-                    else:
-                        # For other objects, continue with existing shadow logic
-                        intersection_shadow = obj.intersect_shadow_ray(shadow_ray, light.position)
-                    if intersection_shadow:
-                        return True
-
-    return False
-
-
-
-
-
 
 
 # Update read_scene_file to handle lights and material properties
@@ -527,7 +453,7 @@ def read_scene_file(scene_file):
                 position = list(map(float, tokens[1:4]))
                 normal = list(map(float, tokens[4:7]))
                 color = list(map(int, tokens[7:10]))
-                scene.add_object(Plane(position, normal, color))
+                scene.add_object(Plane(position, normal, (225, 225, 225)))
             elif tokens[0] == 'light':
                 light_type = tokens[1]
                 if light_type == 'point':

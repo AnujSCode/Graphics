@@ -6,6 +6,7 @@ import multiprocessing
 from multiprocessing import Pool
 import matplotlib.pyplot as plt
 import pygame
+import math
 
 
 scene_file = "scene3.txt"
@@ -39,80 +40,44 @@ def intersect_scene(ray, objects):
 
     return closest_intersection
 
-def phong_lighting(intersection, lights, view_direction, material, objects):
-    ambient_color = np.array([20, 20, 20])  # Ambient color
-    light_direction = None
-    light_distance = None
 
+def phong_model(intersection, light, viewer, ambient_intensity, light_intensity, shininess):
+    # Calculate vectors
+    normal = intersection.object.normal_at(intersection.point)
 
-    # Default values if material properties are missing
-    default_diffuse_color = np.array([225, 225, 225])
-    default_specular_color = np.array([255, 255, 255])
-    default_shininess = 50
+    if light.type == 'point':
+        print("yesmama")
+        light_dir = normalize(light.position - intersection.point)
+    elif light.type == 'directional':
 
-    # Extract material properties if available, otherwise, use default values
-    diffuse_color = np.array(material.get('diffuse_color', default_diffuse_color))
-    specular_color = np.array(material.get('specular_color', default_specular_color))
-    shininess = material.get('shininess', default_shininess)
+        light_dir = normalize(-light.direction)  # Reverse direction for directional light
 
-    object_color = np.array(intersection.object.color)
+    viewer_dir = normalize(viewer - intersection.point)
 
-    total_color = ambient_color * object_color # Initialize with ambient light
+    # Ambient component
+    ambient = np.array(intersection.object.color) * ambient_intensity
 
-    # Debugging lines for ambient light
+    # Diffuse component
+    diffuse_light_intensity = np.maximum(np.dot(light_dir, normal), 0) * light_intensity
+    diffuse = np.array(intersection.object.color) * diffuse_light_intensity
 
+    # Specular component
+    reflection_dir = reflect(-light_dir, normal)
+    specular_light_intensity = light_intensity * (np.maximum(np.dot(reflection_dir, viewer_dir), 0) ** shininess)
+    specular = np.array(light.color) * specular_light_intensity
 
-    for light in lights:
+    # Sum up to get final color
+    color = ambient + diffuse + specular
 
-        light_intensity = np.array(light.color) / 255.0
+    return color
 
-        if light.type == 'point':
-            light_direction = np.array(light.position) - np.array(intersection.point)
-            light_distance = np.linalg.norm(light_direction)
+def normalize(vector):
+    return vector / np.linalg.norm(vector)
 
-
-        elif light.type == 'directional':
-            light_direction = np.array(light.direction)
-            light_distance = float('inf')  # Consider directional light at infinity
-
-
-        # Diffuse component
-        diffuse_factor = max(np.dot(intersection.object.normal, light_direction), 0)
-        diffuse_term = diffuse_color * light_intensity * diffuse_factor
-
-        # Specular component
-        reflection = 2 * np.dot(intersection.object.normal, light_direction) * np.array(
-            intersection.object.normal) - light_direction
-        reflection /= np.linalg.norm(reflection)  # Normalize the reflection vector
-        specular_factor = max(np.dot(reflection, view_direction), 0) ** shininess  # Considering shininess
-        print(f"Reflection Vector: {reflection}")  # Add this line for debugging
-        print(f"View Direction: {view_direction}")  # And this, to check view direction
-
-        specular_term = specular_color * light_intensity * specular_factor * 2
-
-        # Print out intermediate values for debugging
-        print("Diffuse Term:", diffuse_term)
-        print("Specular Term:", specular_term)
-
-        # Shadows: Check if point is in shadow
-        shadow_ray = Ray(intersection.point + 0.001 * light_direction, light_direction)
-        shadow_intersection = intersect_scene(shadow_ray, objects)  # Provide 'objects' argument
-
-        if shadow_intersection is not None and np.linalg.norm(
-                shadow_intersection.point - intersection.point) < light_distance:
-            # Point is in shadow, don't add diffuse and specular terms
-            total_color += ambient_color * object_color
-        else:
-            total_color += (ambient_color * object_color + diffuse_term + specular_term).astype(np.uint8)
-
-
-    total_color = total_color.astype(np.uint8)
-    # Clip each color channel individually and return as a tuple of integers
-    clipped_color = tuple(np.clip(total_color.astype(int), 0, 255))
-
-    return clipped_color
-
-
+def reflect(vector, axis):
+    vector = np.array(vector)
+    axis = np.array(axis)
+    return vector - 2 * np.dot(vector, axis) * axis
 
 class Ray:
     def __init__(self, origin, direction):
@@ -348,10 +313,28 @@ class Scene:
     def add_light(self, light):
         self.lights.append(light)
 
-# Your other code...
+
+import math
+
+def calculate_distance(light, intersection_point):
+    if light is None or intersection_point is None:
+        return float('inf')  # Or handle it based on your use case
+
+    if not isinstance(light, (list, tuple)) or not isinstance(intersection_point, (list, tuple)):
+        return float('inf')  # Or handle it based on your use case
+
+    if len(light) != 3 or len(intersection_point) != 3:
+        return float('inf')  # Or handle it based on your use case
+
+    distance = math.sqrt(
+        (light[0] - intersection_point[0])**2 +
+        (light[1] - intersection_point[1])**2 +
+        (light[2] - intersection_point[2])**2
+    )
+    return distance
+
 
 def render_pixel(i, j, viewport, image_size, camera, objects, lights):
-
     x = viewport[0] + (viewport[2] - viewport[0]) * j / image_size[0]
     y = viewport[1] + (viewport[3] - viewport[1]) * i / image_size[1]
     ray = Ray(camera, [x, y, viewport[4]])
@@ -367,61 +350,42 @@ def render_pixel(i, j, viewport, image_size, camera, objects, lights):
         normal_at_intersection = closest_intersection.object.normal
         view_direction = -incident_direction
 
-        if lights:  # Check if there are lights in the scene
-            in_shadow = is_point_in_shadow(closest_intersection.point, lights, objects, closest_intersection)
+        # Filter out None elements from lights list
+        valid_lights = [light for light in lights if light is not None]
 
-            if in_shadow:
-                pixel_color = phong_lighting(closest_intersection, lights, view_direction,
-                                             closest_intersection.object.material, objects)
-                shadow_color = tuple(int(c * 0.5) for c in pixel_color)
-                pixel_color = shadow_color
+        if valid_lights:  # Check if there are valid lights in the scene
+            closest_light = None
+            closest_distance = float('inf')
 
+            for light in valid_lights:
+                distance = calculate_distance(light.position,
+                                              closest_intersection.point)
+                if distance < closest_distance:
+                    closest_light = light
+                    closest_distance = distance
+
+            if closest_light is not None:
+                in_shadow = is_point_in_shadow(closest_intersection.point, [closest_light], objects, closest_intersection)
+
+                if in_shadow:
+                    pixel_color = phong_model(closest_intersection, [closest_light], view_direction,
+                                              ambient_intensity=0.1, light_intensity=0.8, shininess=50)
+                    shadow_color = tuple(int(c * 0.5) for c in pixel_color)
+                    pixel_color = shadow_color
+                else:
+                    pixel_color = phong_model(closest_intersection, [closest_light], view_direction,
+                                              ambient_intensity=0.1, light_intensity=0.8, shininess=50)
             else:
-
-                pixel_color = phong_lighting(closest_intersection, lights, view_direction,
-
-                                             closest_intersection.object.material, objects)
-
-                intersection_point = closest_intersection.point
-
-                center = np.array([0, 0, 0])  # Assuming the center is at (0, 0, 0)
-
-                distance_from_center = np.linalg.norm(intersection_point - center)
-
-                max_distance = 100.0  # You can adjust the maximum distance for the gradient effect
-
-                normalized_distance = min(distance_from_center / max_distance, 1.0)  # Normalize to [0, 1]
-
-                object_normal = closest_intersection.object.normal_at(intersection_point)
-
-                light_direction = lights[0].direction  # Assuming only one directional light
-
-                light_intensity = np.dot(object_normal, light_direction)
-
-                # Adjust the base color to make the center brighter (closer to white)
-
-                base_color = 200  # Increase this value to make the center brighter
-
-                highlight_intensity = max(light_intensity, 0) * normalized_distance
-
-                # Adjust the highlight_color with the base_color
-
-                highlight_color = tuple(min(int(c + base_color * highlight_intensity), 255) for c in pixel_color)
-
-                # Adding a small white dot at the center
-
-                epsilon = 0.01  # Define a small threshold for considering the center
-
-                if distance_from_center < epsilon:
-                    highlight_color = (255, 255, 255)  # White color for the small dot
-
-                pixel_color = highlight_color
+                pixel_color = phong_model(closest_intersection, [], view_direction,
+                                          ambient_intensity=0.1, light_intensity=0.8, shininess=50)
 
         else:
-            pixel_color = phong_lighting(closest_intersection, [], view_direction, closest_intersection.object.material, objects)
+            pixel_color = phong_model(closest_intersection, [], view_direction,
+                                      ambient_intensity=0.1, light_intensity=0.8, shininess=50)
 
         return (i, j, pixel_color)
     return (i, j, (0, 0, 0))
+
 
 
 
@@ -464,7 +428,7 @@ def is_point_in_shadow(point, lights, objects, intersection):
             if isinstance(obj, Sphere):
                 continue
             for light in lights:
-                if light.type == 'point':
+                if light and hasattr(light, 'type') and light.type == 'point':
                     shadow_ray = Ray(point, np.subtract(light.position, point))
                     if isinstance(obj, Plane):
                         # Check if the shadow ray intersects the plane
@@ -476,6 +440,7 @@ def is_point_in_shadow(point, lights, objects, intersection):
                         return True
 
     return False
+
 
 
 
